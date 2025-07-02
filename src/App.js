@@ -10,10 +10,12 @@ function App() {
   const [tasks, setTasks] = useState([]);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
+  const [loading, setLoading] = useState(false);
 
   // Fetch tasks from the backend
   const fetchTasks = async () => {
     try {
+      setLoading(true);
       const response = await fetch("https://todo-backend-06ap.onrender.com/tasks", {
         method: "GET",
         headers: {
@@ -31,6 +33,8 @@ function App() {
     } catch (error) {
       console.error("Error fetching tasks:", error);
       setTasks([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -73,6 +77,7 @@ function App() {
       setTasks([...tasks, newTask]);
     } catch (error) {
       console.error("Error adding task:", error);
+      alert("Failed to add task. Please try again.");
     }
   };
 
@@ -98,10 +103,11 @@ function App() {
       setTasks(tasks.filter(task => task._id !== id));
     } catch (error) {
       console.error("Error deleting task:", error);
+      alert("Failed to delete task. Please try again.");
     }
   };   
 
-  // Update a task's status
+  // Update a task's status - FIXED VERSION
   const updateTaskStatus = async (id, currentStatus) => {
     if (!id) {
       console.error("Task ID is undefined");
@@ -109,6 +115,12 @@ function App() {
     }
 
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
+    
+    // Optimistically update the UI first
+    const optimisticTasks = tasks.map(task => 
+      task._id === id ? { ...task, status: newStatus } : task
+    );
+    setTasks(optimisticTasks);
 
     try {
       // Use PUT route that exists in your backend
@@ -122,14 +134,27 @@ function App() {
       });
 
       if (!response.ok) {
+        // Revert the optimistic update if the request fails
+        setTasks(tasks);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const result = await response.json();
+      console.log("Status update result:", result);
+      
+      // Update with the actual response from server
       const updatedTask = result.task || result;
-      setTasks(tasks.map(task => task._id === id ? updatedTask : task));
+      if (updatedTask && updatedTask._id) {
+        setTasks(tasks.map(task => task._id === id ? updatedTask : task));
+      } else {
+        // If server doesn't return the updated task, keep our optimistic update
+        console.log("Server didn't return updated task, keeping optimistic update");
+      }
     } catch (error) {
       console.error("Error updating task status:", error);
+      // Revert to original state on error
+      setTasks(tasks);
+      alert("Failed to update task status. Please try again.");
     }
   };
 
@@ -139,6 +164,12 @@ function App() {
       console.error("Task ID is undefined");
       return;
     }
+
+    // Optimistically update the UI first
+    const optimisticTasks = tasks.map(task => 
+      task._id === id ? { ...task, priority: newPriority } : task
+    );
+    setTasks(optimisticTasks);
 
     try {
       const response = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}/priority`, {
@@ -151,13 +182,22 @@ function App() {
       });
 
       if (!response.ok) {
+        // Revert the optimistic update if the request fails
+        setTasks(tasks);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const updatedTask = await response.json();
-      setTasks(tasks.map(task => task._id === id ? updatedTask : task));
+      console.log("Priority update result:", updatedTask);
+      
+      if (updatedTask && updatedTask._id) {
+        setTasks(tasks.map(task => task._id === id ? updatedTask : task));
+      }
     } catch (error) {
       console.error("Error updating task priority:", error);
+      // Revert to original state on error
+      setTasks(tasks);
+      alert("Failed to update task priority. Please try again.");
     }
   };
 
@@ -231,12 +271,18 @@ function App() {
           </select>
         </div>
         
+        {loading && (
+          <div className="text-center text-orange-600 mb-4">
+            Loading tasks...
+          </div>
+        )}
+        
         {/* Tasks after filtering */}
         <ul className='space-y-4'>
           {filterTasks.map((task) => (
             <li key={task._id} className="bg-white p-4 rounded-xl shadow flex flex-col md:flex-row md:items-center md:justify-between gap-4 hover:bg-orange-100 transition duration-300">
               <div className='flex-1'>
-                <span className='text-lg text-orange-800'>
+                <span className={`text-lg ${task.status === 'completed' ? 'line-through text-gray-500' : 'text-orange-800'}`}>
                   {task.text}
                 </span>
                 <span className='ml-2 text-sm text-gray-500'>
@@ -278,7 +324,7 @@ function App() {
           ))}
         </ul>
         
-        {filterTasks.length === 0 && (
+        {filterTasks.length === 0 && !loading && (
           <div className="text-center text-gray-500 mt-8">
             {tasks.length === 0 ? "No tasks yet. Add your first task!" : "No tasks match the current filters."}
           </div>
