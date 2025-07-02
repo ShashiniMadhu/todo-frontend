@@ -15,24 +15,31 @@ export default function Signup() {
         setAuthError("");
         setSuccess(false);
 
-        const response = await fetch("https://todo-backend-06ap.onrender.com/register", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ username, password })
-        });
+        try {
+            const response = await fetch("https://todo-backend-06ap.onrender.com/register", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ username, password })
+            });
 
-        const data = await response.json();
-        setAuthLoading(false);
+            const data = await response.json();
+            setAuthLoading(false);
 
-        if (data.message === "User registered") {
-            setSuccess(true);
-            setTimeout(() => {
-                navigate("/login");
-            }, 1500);
-        } else {
-            setAuthError(data.error || "Signup failed");
+            // Fix: Check for the correct success message
+            if (response.ok && data.message === "User registered successfully") {
+                setSuccess(true);
+                setTimeout(() => {
+                    navigate("/login");
+                }, 1500);
+            } else {
+                setAuthError(data.message || data.error || "Signup failed");
+            }
+        } catch (error) {
+            setAuthLoading(false);
+            setAuthError("Network error. Please try again.");
+            console.error("Signup error:", error);
         }
     };
 
@@ -80,6 +87,7 @@ export default function Signup() {
                 <button
                     type="submit"
                     className='px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded w-full transition-colors duration-300'
+                    disabled={authLoading}
                 >
                     {authLoading ? "Signing up..." : "Signup"}
                 </button>
