@@ -107,7 +107,7 @@ function App() {
     }
   };   
 
-  // Update a task's status - FIXED VERSION
+  // Update a task's status - DEBUG VERSION
   const updateTaskStatus = async (id, currentStatus) => {
     if (!id) {
       console.error("Task ID is undefined");
@@ -116,6 +116,12 @@ function App() {
 
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
     
+    console.log("Updating task:", { id, currentStatus, newStatus });
+    console.log("Token:", token ? "Present" : "Missing");
+    
+    // Store original tasks for potential rollback
+    const originalTasks = [...tasks];
+    
     // Optimistically update the UI first
     const optimisticTasks = tasks.map(task => 
       task._id === id ? { ...task, status: newStatus } : task
@@ -123,7 +129,9 @@ function App() {
     setTasks(optimisticTasks);
 
     try {
-      // Use PUT route that exists in your backend
+      // Try different API endpoints to see which one works
+      console.log("Attempting PUT request to:", `https://todo-backend-06ap.onrender.com/tasks/${id}`);
+      
       const response = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}`, {
         method: "PUT",
         headers: {
@@ -133,28 +141,93 @@ function App() {
         body: JSON.stringify({ status: newStatus }),
       });
 
+      console.log("Response status:", response.status);
+      console.log("Response headers:", response.headers);
+      
+      // Get response text first to see what we're getting
+      const responseText = await response.text();
+      console.log("Raw response:", responseText);
+
       if (!response.ok) {
-        // Revert the optimistic update if the request fails
-        setTasks(tasks);
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Try alternative endpoint - PATCH method
+        console.log("PUT failed, trying PATCH method...");
+        
+        const patchResponse = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ status: newStatus }),
+        });
+
+        if (!patchResponse.ok) {
+          // Try another alternative - status-specific endpoint
+          console.log("PATCH failed, trying status-specific endpoint...");
+          
+          const statusResponse = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}/status`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ status: newStatus }),
+          });
+
+          if (!statusResponse.ok) {
+            const statusText = await statusResponse.text();
+            console.error("All endpoints failed. Last response:", statusText);
+            throw new Error(`All HTTP methods failed. Status: ${response.status}, Message: ${responseText}`);
+          }
+
+          const statusResult = await statusResponse.json();
+          console.log("Status endpoint success:", statusResult);
+          const updatedTask = statusResult.task || statusResult;
+          if (updatedTask && updatedTask._id) {
+            setTasks(originalTasks.map(task => task._id === id ? updatedTask : task));
+          }
+          return;
+        }
+
+        const patchResult = await patchResponse.json();
+        console.log("PATCH success:", patchResult);
+        const updatedTask = patchResult.task || patchResult;
+        if (updatedTask && updatedTask._id) {
+          setTasks(originalTasks.map(task => task._id === id ? updatedTask : task));
+        }
+        return;
       }
 
-      const result = await response.json();
-      console.log("Status update result:", result);
+      // PUT succeeded
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error("Failed to parse response as JSON:", parseError);
+        // Keep optimistic update if parse fails but request succeeded
+        return;
+      }
+      
+      console.log("PUT success:", result);
       
       // Update with the actual response from server
       const updatedTask = result.task || result;
       if (updatedTask && updatedTask._id) {
-        setTasks(tasks.map(task => task._id === id ? updatedTask : task));
+        setTasks(originalTasks.map(task => task._id === id ? updatedTask : task));
       } else {
         // If server doesn't return the updated task, keep our optimistic update
         console.log("Server didn't return updated task, keeping optimistic update");
       }
     } catch (error) {
       console.error("Error updating task status:", error);
+      console.error("Error details:", {
+        message: error.message,
+        stack: error.stack
+      });
+      
       // Revert to original state on error
-      setTasks(tasks);
-      alert("Failed to update task status. Please try again.");
+      setTasks(originalTasks);
+      alert(`Failed to update task status: ${error.message}`);
     }
   };
 
