@@ -11,6 +11,7 @@ function App() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Fetch tasks from the backend
   const fetchTasks = async () => {
@@ -52,7 +53,7 @@ function App() {
   };
 
   // Add a new task
-  const addTask = async (text) => {
+  const addTask = async (text, priority = "medium") => {
     try {
       const response = await fetch("https://todo-backend-06ap.onrender.com/tasks", {
         method: "POST",
@@ -63,7 +64,7 @@ function App() {
         body: JSON.stringify({
           text,
           status: "pending",
-          priority: "medium"
+          priority
         }),
       });
 
@@ -72,7 +73,6 @@ function App() {
       }
 
       const result = await response.json();
-      // Extract the task from the response (your backend returns {message, task})
       const newTask = result.task || result;
       setTasks([...tasks, newTask]);
     } catch (error) {
@@ -107,7 +107,7 @@ function App() {
     }
   };   
 
-  // Update a task's status - DEBUG VERSION
+  // Update a task's status - FIXED VERSION
   const updateTaskStatus = async (id, currentStatus) => {
     if (!id) {
       console.error("Task ID is undefined");
@@ -115,9 +115,6 @@ function App() {
     }
 
     const newStatus = currentStatus === "pending" ? "completed" : "pending";
-    
-    console.log("Updating task:", { id, currentStatus, newStatus });
-    console.log("Token:", token ? "Present" : "Missing");
     
     // Store original tasks for potential rollback
     const originalTasks = [...tasks];
@@ -129,10 +126,8 @@ function App() {
     setTasks(optimisticTasks);
 
     try {
-      // Try different API endpoints to see which one works
-      console.log("Attempting PUT request to:", `https://todo-backend-06ap.onrender.com/tasks/${id}`);
-      
-      const response = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}`, {
+      // Use the correct endpoint that matches your backend
+      const response = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}/status`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -141,90 +136,18 @@ function App() {
         body: JSON.stringify({ status: newStatus }),
       });
 
-      console.log("Response status:", response.status);
-      console.log("Response headers:", response.headers);
-      
-      // Get response text first to see what we're getting
-      const responseText = await response.text();
-      console.log("Raw response:", responseText);
-
       if (!response.ok) {
-        // Try alternative endpoint - PATCH method
-        console.log("PUT failed, trying PATCH method...");
-        
-        const patchResponse = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ status: newStatus }),
-        });
-
-        if (!patchResponse.ok) {
-          // Try another alternative - status-specific endpoint
-          console.log("PATCH failed, trying status-specific endpoint...");
-          
-          const statusResponse = await fetch(`https://todo-backend-06ap.onrender.com/tasks/${id}/status`, {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ status: newStatus }),
-          });
-
-          if (!statusResponse.ok) {
-            const statusText = await statusResponse.text();
-            console.error("All endpoints failed. Last response:", statusText);
-            throw new Error(`All HTTP methods failed. Status: ${response.status}, Message: ${responseText}`);
-          }
-
-          const statusResult = await statusResponse.json();
-          console.log("Status endpoint success:", statusResult);
-          const updatedTask = statusResult.task || statusResult;
-          if (updatedTask && updatedTask._id) {
-            setTasks(originalTasks.map(task => task._id === id ? updatedTask : task));
-          }
-          return;
-        }
-
-        const patchResult = await patchResponse.json();
-        console.log("PATCH success:", patchResult);
-        const updatedTask = patchResult.task || patchResult;
-        if (updatedTask && updatedTask._id) {
-          setTasks(originalTasks.map(task => task._id === id ? updatedTask : task));
-        }
-        return;
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // PUT succeeded
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error("Failed to parse response as JSON:", parseError);
-        // Keep optimistic update if parse fails but request succeeded
-        return;
-      }
-      
-      console.log("PUT success:", result);
-      
-      // Update with the actual response from server
+      const result = await response.json();
       const updatedTask = result.task || result;
+      
       if (updatedTask && updatedTask._id) {
         setTasks(originalTasks.map(task => task._id === id ? updatedTask : task));
-      } else {
-        // If server doesn't return the updated task, keep our optimistic update
-        console.log("Server didn't return updated task, keeping optimistic update");
       }
     } catch (error) {
       console.error("Error updating task status:", error);
-      console.error("Error details:", {
-        message: error.message,
-        stack: error.stack
-      });
-      
       // Revert to original state on error
       setTasks(originalTasks);
       alert(`Failed to update task status: ${error.message}`);
@@ -238,6 +161,9 @@ function App() {
       return;
     }
 
+    // Store original tasks for rollback
+    const originalTasks = [...tasks];
+    
     // Optimistically update the UI first
     const optimisticTasks = tasks.map(task => 
       task._id === id ? { ...task, priority: newPriority } : task
@@ -256,159 +182,296 @@ function App() {
 
       if (!response.ok) {
         // Revert the optimistic update if the request fails
-        setTasks(tasks);
+        setTasks(originalTasks);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const updatedTask = await response.json();
-      console.log("Priority update result:", updatedTask);
       
       if (updatedTask && updatedTask._id) {
-        setTasks(tasks.map(task => task._id === id ? updatedTask : task));
+        setTasks(originalTasks.map(task => task._id === id ? updatedTask : task));
       }
     } catch (error) {
       console.error("Error updating task priority:", error);
       // Revert to original state on error
-      setTasks(tasks);
+      setTasks(originalTasks);
       alert("Failed to update task priority. Please try again.");
     }
   };
 
-  // Filtering tasks
+  // Get priority color
+  const getPriorityColor = (priority) => {
+    switch(priority) {
+      case 'high': return 'bg-red-100 text-red-800 border-red-200';
+      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'low': return 'bg-green-100 text-green-800 border-green-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
+
+  // Filtering and searching tasks
   const filterTasks = tasks.filter(
     (task) => 
       (filterStatus === "all" || task.status === filterStatus) &&
-      (filterPriority === "all" || task.priority === filterPriority)
+      (filterPriority === "all" || task.priority === filterPriority) &&
+      (searchTerm === "" || task.text.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // Simple MainApp component
-  const MainApp = () => (
-    <div className="min-h-screen bg-orange-50 flex flex-col">
-      <nav className="bg-orange-500 text-white px-6 py-4 flex justify-between items-center shadow-md">
-        <ul className='flex space-x-4'>
-          <li>
-            <a href="#" className="px-4 py-2 rounded-full font-semibold transition-colors duration-200 hover:bg-orange-600 hover:text-white focus:bg-orange-700 focus:outline-none shadow-sm">
-              Home
-            </a>
-          </li>
-        </ul>
-        <button onClick={logout} className="px-4 py-2 rounded-full font-semibold transition-colors duration-200 hover:bg-orange-600 hover:text-white focus:bg-orange-700 focus:outline-none shadow-sm">
-          Logout
-        </button>
-      </nav>
-      
-      <main className='flex-1 p-8'>
-        <h2 className='text-4xl font-extrabold text-center mb-8 text-orange-600 drop-shadow'>Welcome to the Todo App</h2>
-        
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          const input = e.target[0];
-          if (input.value.trim()) {
-            addTask(input.value.trim());
-            input.value = '';
-          }
-        }}
-        className="flex justify-center items-center gap-2 mb-6"
-        >
-          <input 
-            type="text" 
-            className="p-3 border-2 border-orange-300 rounded-lg w-2/3 focus:outline-none focus:ring-2 focus:ring-orange-400" 
-            placeholder="Add a new task"
-            required
-          />
-          <button type="submit" className="ml-4 px-4 py-2 bg-orange-500 rounded-full font-semibold transition-colors duration-200 hover:bg-orange-600 hover:text-white focus:bg-orange-700 focus:outline-none shadow-sm">
-            Add Task
-          </button>
-        </form>
-        
-        <div className='mb-6 flex gap-4 justify-center'>
-          <select 
-            onChange={(e) => setFilterStatus(e.target.value)} 
-            className="p-2 border-2 border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400" 
-            value={filterStatus}
-          >
-            <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="completed">Completed</option>
-          </select>
-          
-          <select 
-            onChange={(e) => setFilterPriority(e.target.value)} 
-            className="p-2 border-2 border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400"
-            value={filterPriority}
-          > 
-            <option value="all">All Priorities</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-        
-        {loading && (
-          <div className="text-center text-orange-600 mb-4">
-            Loading tasks...
-          </div>
-        )}
-        
-        {/* Tasks after filtering */}
-        <ul className='space-y-4'>
-          {filterTasks.map((task) => (
-            <li key={task._id} className="bg-white p-4 rounded-xl shadow flex flex-col md:flex-row md:items-center md:justify-between gap-4 hover:bg-orange-100 transition duration-300">
-              <div className='flex-1'>
-                <span className={`text-lg ${task.status === 'completed' ? 'line-through text-gray-500' : 'text-orange-800'}`}>
-                  {task.text}
-                </span>
-                <span className='ml-2 text-sm text-gray-500'>
-                  ({task.status}, {task.priority})
-                </span>
+  // Task statistics
+  const taskStats = {
+    total: tasks.length,
+    completed: tasks.filter(task => task.status === 'completed').length,
+    pending: tasks.filter(task => task.status === 'pending').length,
+    high: tasks.filter(task => task.priority === 'high').length
+  };
+
+  // Enhanced MainApp component with beautiful UI
+  const MainApp = () => {
+    const [newTask, setNewTask] = useState("");
+    const [newTaskPriority, setNewTaskPriority] = useState("medium");
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50">
+        {/* Enhanced Navigation */}
+        <nav className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-6 py-4 shadow-lg">
+          <div className="max-w-6xl mx-auto flex justify-between items-center">
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                <span className="text-2xl">✓</span>
               </div>
-              
-              <div className='flex gap-2 items-center'>
-                <button 
-                  onClick={() => updateTaskStatus(task._id, task.status)}
-                  className={`px-3 py-1 rounded-full font-semibold transition-colors duration-300 ${
-                    task.status === "pending" 
-                      ? "bg-yellow-400 text-yellow-900 hover:bg-yellow-500" 
-                      : "bg-green-400 text-green-900 hover:bg-green-500"
-                  }`}
-                >
-                  {task.status === "pending" ? "Mark Complete" : "Mark Pending"}
-                </button>
-                
+              <h1 className="text-2xl font-bold">TaskMaster Pro</h1>
+            </div>
+            <button 
+              onClick={logout} 
+              className="px-6 py-2 bg-white bg-opacity-20 rounded-full font-semibold hover:bg-opacity-30 transition-all duration-300 backdrop-blur-sm"
+            >
+              Logout
+            </button>
+          </div>
+        </nav>
+        
+        <main className='max-w-6xl mx-auto p-6'>
+          {/* Welcome Section with Stats */}
+          <div className="mb-8 text-center">
+            <h2 className='text-5xl font-extrabold mb-4 bg-gradient-to-r from-orange-600 to-amber-600 bg-clip-text text-transparent'>
+              Welcome to TaskMaster Pro
+            </h2>
+            <p className="text-gray-600 text-lg mb-6">Organize your life, one task at a time</p>
+            
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              <div className="bg-white rounded-xl p-4 shadow-lg border border-orange-100">
+                <div className="text-3xl font-bold text-orange-600">{taskStats.total}</div>
+                <div className="text-sm text-gray-600">Total Tasks</div>
+              </div>
+              <div className="bg-white rounded-xl p-4 shadow-lg border border-green-100">
+                <div className="text-3xl font-bold text-green-600">{taskStats.completed}</div>
+                <div className="text-sm text-gray-600">Completed</div>
+              </div>
+              <div className="bg-white rounded-xl p-4 shadow-lg border border-yellow-100">
+                <div className="text-3xl font-bold text-yellow-600">{taskStats.pending}</div>
+                <div className="text-sm text-gray-600">Pending</div>
+              </div>
+              <div className="bg-white rounded-xl p-4 shadow-lg border border-red-100">
+                <div className="text-3xl font-bold text-red-600">{taskStats.high}</div>
+                <div className="text-sm text-gray-600">High Priority</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Enhanced Add Task Form */}
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-8 border border-orange-100">
+            <h3 className="text-xl font-semibold text-gray-800 mb-4">Add New Task</h3>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (newTask.trim()) {
+                addTask(newTask.trim(), newTaskPriority);
+                setNewTask('');
+                setNewTaskPriority('medium');
+              }
+            }} className="flex flex-col md:flex-row gap-4">
+              <input 
+                type="text" 
+                value={newTask}
+                onChange={(e) => setNewTask(e.target.value)}
+                className="flex-1 p-4 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent transition-all duration-300" 
+                placeholder="What needs to be done?"
+                required
+              />
+              <select 
+                value={newTaskPriority}
+                onChange={(e) => setNewTaskPriority(e.target.value)}
+                className="p-4 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent transition-all duration-300"
+              >
+                <option value="low">🟢 Low Priority</option>
+                <option value="medium">🟡 Medium Priority</option>
+                <option value="high">🔴 High Priority</option>
+              </select>
+              <button 
+                type="submit" 
+                className="px-8 py-4 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-semibold hover:from-orange-600 hover:to-amber-600 transform hover:scale-105 transition-all duration-300 shadow-lg"
+              >
+                Add Task
+              </button>
+            </form>
+          </div>
+          
+          {/* Enhanced Filters and Search */}
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-8 border border-orange-100">
+            <h3 className="text-xl font-semibold text-gray-800 mb-4">Filter & Search</h3>
+            <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Search Tasks</label>
+                <input 
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full p-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent transition-all duration-300"
+                  placeholder="Search your tasks..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Status</label>
                 <select 
-                  value={task.priority}
-                  onChange={(e) => updateTaskPriority(task._id, e.target.value)}
-                  className='p-2 border-2 border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400'
+                  onChange={(e) => setFilterStatus(e.target.value)} 
+                  className="w-full p-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent transition-all duration-300" 
+                  value={filterStatus}
                 >
+                  <option value="all">All Statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Priority</label>
+                <select 
+                  onChange={(e) => setFilterPriority(e.target.value)} 
+                  className="w-full p-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent transition-all duration-300"
+                  value={filterPriority}
+                > 
+                  <option value="all">All Priorities</option>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                 </select>
-                
-                <button 
-                  onClick={() => deleteTask(task._id)} 
-                  title="Delete task" 
-                  className="flex items-center gap-1 px-3 py-1 bg-red-500 hover:bg-red-700 text-white font-semibold rounded-full transition-colors duration-200 ml-2"
-                >
-                  <i className='fas fa-trash'></i>Delete
-                </button>
               </div>
-            </li>
-          ))}
-        </ul>
-        
-        {filterTasks.length === 0 && !loading && (
-          <div className="text-center text-gray-500 mt-8">
-            {tasks.length === 0 ? "No tasks yet. Add your first task!" : "No tasks match the current filters."}
+            </div>
           </div>
-        )}
-      </main>
-      
-      <footer className="bg-orange-500 text-white p-4 mt-auto text-center shadow-inner">
-        © 2025 Your To-Do App
-      </footer>
-    </div>
-  );
+          
+          {loading && (
+            <div className="text-center py-8">
+              <div className="inline-flex items-center px-6 py-3 bg-white rounded-full shadow-lg">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500 mr-3"></div>
+                <span className="text-orange-600 font-medium">Loading tasks...</span>
+              </div>
+            </div>
+          )}
+          
+          {/* Enhanced Tasks List */}
+          <div className="space-y-4">
+            {filterTasks.map((task, index) => (
+              <div 
+                key={task._id} 
+                className={`bg-white rounded-2xl shadow-lg border border-orange-100 p-6 transform hover:scale-[1.02] transition-all duration-300 ${
+                  task.status === 'completed' ? 'opacity-75' : ''
+                }`}
+                style={{
+                  animationDelay: `${index * 100}ms`
+                }}
+              >
+                <div className='flex flex-col md:flex-row md:items-center md:justify-between gap-4'>
+                  <div className='flex-1 flex items-center gap-3'>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                      task.status === 'completed' 
+                        ? 'bg-green-500 border-green-500' 
+                        : 'border-gray-300 hover:border-orange-400'
+                    } transition-colors duration-200`}>
+                      {task.status === 'completed' && (
+                        <span className="text-white text-sm">✓</span>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <span className={`text-lg font-medium ${
+                        task.status === 'completed' 
+                          ? 'line-through text-gray-500' 
+                          : 'text-gray-800'
+                      }`}>
+                        {task.text}
+                      </span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(task.priority)}`}>
+                          {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)} Priority
+                        </span>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          task.status === 'completed' 
+                            ? 'bg-green-100 text-green-800 border border-green-200' 
+                            : 'bg-orange-100 text-orange-800 border border-orange-200'
+                        }`}>
+                          {task.status.charAt(0).toUpperCase() + task.status.slice(1)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className='flex gap-3 items-center flex-wrap'>
+                    <button 
+                      onClick={() => updateTaskStatus(task._id, task.status)}
+                      className={`px-4 py-2 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 ${
+                        task.status === "pending" 
+                          ? "bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-200" 
+                          : "bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-200"
+                      }`}
+                    >
+                      {task.status === "pending" ? "✓ Complete" : "↺ Reopen"}
+                    </button>
+                    
+                    <select 
+                      value={task.priority}
+                      onChange={(e) => updateTaskPriority(task._id, e.target.value)}
+                      className='p-2 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent transition-all duration-300'
+                    >
+                      <option value="low">🟢 Low</option>
+                      <option value="medium">🟡 Medium</option>
+                      <option value="high">🔴 High</option>
+                    </select>
+                    
+                    <button 
+                      onClick={() => deleteTask(task._id)} 
+                      className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-200"
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {filterTasks.length === 0 && !loading && (
+            <div className="text-center py-16">
+              <div className="text-6xl mb-4">📝</div>
+              <h3 className="text-2xl font-semibold text-gray-600 mb-2">
+                {tasks.length === 0 ? "No tasks yet!" : "No tasks match your filters"}
+              </h3>
+              <p className="text-gray-500">
+                {tasks.length === 0 
+                  ? "Add your first task to get started on your productivity journey." 
+                  : "Try adjusting your filters or search term to find more tasks."}
+              </p>
+            </div>
+          )}
+        </main>
+        
+        {/* Enhanced Footer */}
+        <footer className="bg-gradient-to-r from-orange-500 to-amber-500 text-white p-6 mt-16">
+          <div className="max-w-6xl mx-auto text-center">
+            <p className="text-lg font-medium">© 2025 TaskMaster Pro</p>
+            <p className="text-sm opacity-75 mt-1">Empowering productivity, one task at a time</p>
+          </div>
+        </footer>
+      </div>
+    );
+  };
 
   return (
     <Router>
