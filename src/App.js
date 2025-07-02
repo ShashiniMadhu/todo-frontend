@@ -214,8 +214,8 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login setToken={setToken} />} />
         <Route path="/signup" element={<Signup />} />
-        {/* <Route path="/" element={token ? <MainApp /> : <Navigate to="/login" replace />} /> */}
-        <Route path="/" element={<MainApp />}/>
+        <Route path="/" element={token ? <MainApp /> : <Navigate to="/login" replace />} />
+        {/* <Route path="/" element={<MainApp />}/> */}
       </Routes>
     </Router>
   );
